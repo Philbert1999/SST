@@ -52,17 +52,26 @@ def load_daily_data(_provider: AkshareProvider, code: str, start_date: date, end
 def build_sidebar() -> dict:
     st.sidebar.header("\u7b5b\u9009\u6761\u4ef6")
 
-    default_start = date.today() - timedelta(days=APP_CONFIG.ui.default_history_days)
-    default_end = date.today()
-    date_range = st.sidebar.date_input(
-        "\u65e5\u671f\u8303\u56f4",
-        value=(default_start, default_end),
-        max_value=date.today(),
+    today = date.today()
+    default_start = today - timedelta(days=APP_CONFIG.ui.default_history_days)
+    default_end = today
+    start_date = st.sidebar.date_input(
+        "\u5f00\u59cb\u65e5\u671f",
+        value=default_start,
+        max_value=today,
+        key="scan_start_date",
     )
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-    else:
-        start_date, end_date = default_start, default_end
+    end_date = st.sidebar.date_input(
+        "\u7ed3\u675f\u65e5\u671f",
+        value=default_end,
+        max_value=today,
+        key="scan_end_date",
+    )
+    start_date, end_date, date_valid, date_message = normalize_scan_dates(start_date, end_date, today)
+    if not date_valid:
+        st.sidebar.error(date_message)
+    elif (end_date - start_date).days < 45:
+        st.sidebar.warning("\u65e5\u671f\u8de8\u5ea6\u8f83\u77ed\uff0c\u90e8\u5206\u7b56\u7565\u53ef\u80fd\u56e0\u6837\u672c\u4e0d\u8db3\u800c\u65e0\u6cd5\u89e6\u53d1\u3002")
 
     selected_strategy_names = st.sidebar.multiselect(
         "\u7b56\u7565\u9009\u62e9",
@@ -105,7 +114,24 @@ def build_sidebar() -> dict:
         "exclude_new": exclude_new,
         "exclude_star_market": exclude_star_market,
         "run_scan": run_scan,
+        "date_valid": date_valid,
+        "date_message": date_message,
     }
+
+
+def normalize_scan_dates(start_date, end_date, today: date) -> tuple[date, date, bool, str]:
+    """Normalize and validate sidebar scan dates."""
+    try:
+        start = pd.to_datetime(start_date).date()
+        end = pd.to_datetime(end_date).date()
+    except Exception:
+        return today - timedelta(days=APP_CONFIG.ui.default_history_days), today, False, "\u65e5\u671f\u683c\u5f0f\u65e0\u6548\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9\u3002"
+
+    if start > today or end > today:
+        return min(start, today), min(end, today), False, "\u65e5\u671f\u4e0d\u80fd\u8d85\u8fc7\u4eca\u5929\u3002"
+    if start > end:
+        return start, end, False, "\u5f00\u59cb\u65e5\u671f\u4e0d\u80fd\u665a\u4e8e\u7ed3\u675f\u65e5\u671f\u3002"
+    return start, end, True, ""
 
 
 def init_state() -> None:
@@ -124,6 +150,9 @@ def init_state() -> None:
 
 
 def run_scan(provider: AkshareProvider, options: dict) -> None:
+    if not options.get("date_valid", True):
+        st.error(options.get("date_message") or "\u65e5\u671f\u9009\u62e9\u65e0\u6548\u3002")
+        return
     if not options["selected_strategy_names"]:
         st.warning("\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u4e2a\u7b56\u7565\u3002")
         return
