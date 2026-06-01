@@ -104,7 +104,7 @@ def evaluate_snapshot(
         try:
             history_start = signal_date - timedelta(days=10)
             history_end = signal_date + timedelta(days=max(20, horizon * 4))
-            history = data_provider.get_daily_data(code, history_start, history_end)
+            history = _get_daily_data(data_provider, code, history_start, history_end, force_refresh=True)
             rows.append(_evaluate_one(item, history, signal_date, horizon))
         except Exception as exc:
             row = _base_result_row(item)
@@ -157,6 +157,14 @@ def _numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(df[column], errors="coerce").dropna()
 
 
+def _get_daily_data(data_provider, code: str, start_date: date, end_date: date, force_refresh: bool) -> pd.DataFrame:
+    """Fetch daily data, using fresh vendor data when the provider supports it."""
+    try:
+        return data_provider.get_daily_data(code, start_date, end_date, force_refresh=force_refresh)
+    except TypeError:
+        return data_provider.get_daily_data(code, start_date, end_date)
+
+
 def _evaluate_one(item: pd.Series, history: pd.DataFrame, signal_date: date, horizon: int) -> dict[str, Any]:
     row = _base_result_row(item)
     if history is None or history.empty:
@@ -200,10 +208,11 @@ def _evaluate_one(item: pd.Series, history: pd.DataFrame, signal_date: date, hor
         row[f"return_d{day}"] = round(ret, 2)
 
     valid_returns = [value for value in returns if pd.notna(value)]
+    row["available_forward_days"] = len(valid_returns)
     row["max_return_5d"] = round(max(valid_returns), 2) if valid_returns else pd.NA
     row["min_return_5d"] = round(min(valid_returns), 2) if valid_returns else pd.NA
     row["positive_any_5d"] = bool(any(value > 0 for value in valid_returns)) if valid_returns else pd.NA
-    row["eval_error"] = ""
+    row["eval_error"] = "" if len(valid_returns) >= horizon else f"future_data_pending_{len(valid_returns)}d"
     return row
 
 
@@ -216,6 +225,7 @@ def _base_result_row(item: pd.Series) -> dict[str, Any]:
         "triggered_strategies": item.get("triggered_strategies", ""),
         "base_date": pd.NA,
         "base_close": item.get("close", pd.NA),
+        "available_forward_days": 0,
         "eval_error": "",
     }
 
@@ -232,7 +242,7 @@ def _date_text(value) -> str:
 
 
 def _empty_evaluation() -> pd.DataFrame:
-    columns = ["code", "name", "signal_date", "total_score", "triggered_strategies", "base_date", "base_close"]
+    columns = ["code", "name", "signal_date", "total_score", "triggered_strategies", "base_date", "base_close", "available_forward_days"]
     for day in range(1, 6):
         columns += [f"date_d{day}", f"close_d{day}", f"return_d{day}"]
     columns += ["max_return_5d", "min_return_5d", "positive_any_5d", "eval_error"]

@@ -311,6 +311,14 @@ def render_performance_review(provider: AkshareProvider) -> None:
         return
 
     summary = summarize_evaluation(evaluation, horizon=horizon)
+    available_days = pd.to_numeric(evaluation.get("available_forward_days"), errors="coerce").max()
+    available_days = int(available_days) if pd.notna(available_days) else 0
+    if available_days < 5:
+        st.info(
+            f"\u5f53\u524d\u884c\u60c5\u6570\u636e\u6700\u591a\u53ea\u8986\u76d6\u5230 D{available_days}\u3002"
+            "\u8fd9\u901a\u5e38\u662f\u56e0\u4e3a\u7b5b\u9009\u65e5\u4e4b\u540e\u8fd8\u6ca1\u8d70\u5b8c 5 \u4e2a\u4ea4\u6613\u65e5\uff0c"
+            "\u540e\u7eed\u4ea4\u6613\u65e5\u6536\u76d8\u540e\u91cd\u65b0\u70b9\u51fb\u590d\u76d8\u6309\u94ae\u5c31\u4f1a\u8865\u4e0a\u3002"
+        )
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("\u590d\u76d8\u6837\u672c", f"{summary['sample_count']:,}")
     m2.metric(f"D{horizon} \u5e73\u5747\u6536\u76ca", f"{summary['avg_return_selected']:.2f}%")
@@ -326,10 +334,16 @@ def render_performance_review(provider: AkshareProvider) -> None:
         "triggered_strategies",
         "base_date",
         "base_close",
+        "available_forward_days",
+        "date_d1",
         "return_d1",
+        "date_d2",
         "return_d2",
+        "date_d3",
         "return_d3",
+        "date_d4",
         "return_d4",
+        "date_d5",
         "return_d5",
         "max_return_5d",
         "min_return_5d",

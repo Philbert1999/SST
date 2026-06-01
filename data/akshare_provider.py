@@ -63,12 +63,12 @@ class AkshareProvider(DataProvider):
         self.cache.set(cache_key, stock_list)
         return stock_list
 
-    def get_daily_data(self, code: str, start_date, end_date) -> pd.DataFrame:
+    def get_daily_data(self, code: str, start_date, end_date, force_refresh: bool = False) -> pd.DataFrame:
         code = self._normalize_code(code)
         start = self._normalize_date(start_date)
         end = self._normalize_date(end_date)
         cache_key = f"akshare_daily_{code}_{start}_{end}_{self.adjust}"
-        cached = self.cache.get(cache_key, self.daily_cache_ttl_seconds)
+        cached = None if force_refresh else self.cache.get(cache_key, self.daily_cache_ttl_seconds)
         if cached is not None:
             logger.info("Loaded daily data from cache: %s %s rows", code, len(cached))
             return cached.copy()

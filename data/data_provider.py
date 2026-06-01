@@ -20,7 +20,7 @@ class DataProvider(ABC):
         """Return stock metadata: code, name, market, is_st, listing_date."""
 
     @abstractmethod
-    def get_daily_data(self, code: str, start_date, end_date) -> pd.DataFrame:
+    def get_daily_data(self, code: str, start_date, end_date, force_refresh: bool = False) -> pd.DataFrame:
         """Return normalized daily bars for one stock."""
 
     @abstractmethod
