@@ -263,7 +263,7 @@ def render_main(provider: AkshareProvider, options: dict) -> None:
 def render_performance_review(provider: AkshareProvider) -> None:
     st.subheader("\u7b5b\u9009\u8d28\u91cf\u590d\u76d8")
     st.markdown(
-        '<div class="subtle-note">\u9009\u62e9\u67d0\u6b21\u7b5b\u9009\u5feb\u7167\uff0c\u68c0\u67e5\u5165\u9009\u80a1\u7968\u5728\u4e4b\u540e 5 \u4e2a\u4ea4\u6613\u65e5\u7684\u6536\u76ca\u8868\u73b0\u3002\u6536\u76ca\u6309\u7b5b\u9009\u65e5\u6536\u76d8\u4ef7\u5230\u540e\u7eed\u6536\u76d8\u4ef7\u8ba1\u7b97\u3002</div>',
+        '<div class="subtle-note">\u9009\u62e9\u67d0\u6b21\u7b5b\u9009\u5feb\u7167\uff0c\u68c0\u67e5\u5165\u9009\u80a1\u7968\u5728\u4e4b\u540e 1-5 \u4e2a\u4ea4\u6613\u65e5\u7684\u6536\u76ca\u8868\u73b0\u3002\u6536\u76ca\u6309\u7b5b\u9009\u65e5\u6536\u76d8\u4ef7\u5230\u540e\u7eed\u6536\u76d8\u4ef7\u8ba1\u7b97\u3002</div>',
         unsafe_allow_html=True,
     )
 
@@ -276,13 +276,21 @@ def render_performance_review(provider: AkshareProvider) -> None:
     selected_label = st.selectbox("\u9009\u62e9\u5386\u53f2\u7b5b\u9009\u5feb\u7167", labels)
     selected_snapshot = snapshots[labels.index(selected_label)]
     snapshot = load_snapshot(selected_snapshot.path)
+    horizon = st.radio(
+        "\u6307\u6807\u7edf\u8ba1\u5929\u6570",
+        options=[1, 2, 3, 4, 5],
+        index=4,
+        format_func=lambda value: f"D{value}",
+        horizontal=True,
+    )
+    st.caption("\u8868\u683c\u59cb\u7ec8\u4fdd\u7559 D1-D5 \u6536\u76ca\u660e\u7ec6\uff1b\u4e0a\u65b9\u6307\u6807\u548c\u56fe\u8868\u6309\u4f60\u9009\u62e9\u7684\u5929\u6570\u5207\u6362\u3002")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("\u5feb\u7167\u65e5\u671f", selected_snapshot.signal_date or "-")
     c2.metric("\u5019\u9009\u80a1\u6570", f"{len(snapshot):,}")
     c3.metric("\u521b\u5efa\u65f6\u95f4", selected_snapshot.created_at or "-")
 
-    if st.button("\u8ba1\u7b97\u672a\u6765 5 \u4e2a\u4ea4\u6613\u65e5\u8868\u73b0", type="primary", use_container_width=True):
+    if st.button(f"\u8ba1\u7b97\u672a\u6765 1-5 \u4e2a\u4ea4\u6613\u65e5\u8868\u73b0\uff08\u5f53\u524d\u805a\u7126 D{horizon}\uff09", type="primary", use_container_width=True):
         progress = st.progress(0, text="\u6b63\u5728\u590d\u76d8\u5019\u9009\u80a1...")
 
         def on_progress(done: int, total: int, code: str) -> None:
@@ -302,14 +310,14 @@ def render_performance_review(provider: AkshareProvider) -> None:
         st.dataframe(snapshot, use_container_width=True, hide_index=True)
         return
 
-    summary = summarize_evaluation(evaluation, horizon=5)
+    summary = summarize_evaluation(evaluation, horizon=horizon)
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("\u590d\u76d8\u6837\u672c", f"{summary['sample_count']:,}")
-    m2.metric("D5 \u5e73\u5747\u6536\u76ca", f"{summary['avg_return_d5']:.2f}%")
-    m3.metric("D5 \u4e0a\u6da8\u5360\u6bd4", f"{summary['win_rate_d5']:.1f}%")
-    m4.metric("D5 \u6700\u9ad8/\u6700\u4f4e", f"{summary['best_return_d5']:.2f}% / {summary['worst_return_d5']:.2f}%")
+    m2.metric(f"D{horizon} \u5e73\u5747\u6536\u76ca", f"{summary['avg_return_selected']:.2f}%")
+    m3.metric(f"D{horizon} \u4e0a\u6da8\u5360\u6bd4", f"{summary['win_rate_selected']:.1f}%")
+    m4.metric(f"D{horizon} \u6700\u9ad8/\u6700\u4f4e", f"{summary['best_return_selected']:.2f}% / {summary['worst_return_selected']:.2f}%")
 
-    st.plotly_chart(forward_return_chart(summary, horizon=5), use_container_width=True)
+    st.plotly_chart(forward_return_chart(summary, horizon=horizon), use_container_width=True)
 
     show_cols = [
         "code",

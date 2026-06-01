@@ -116,28 +116,45 @@ def evaluate_snapshot(
 
 def summarize_evaluation(evaluation: pd.DataFrame, horizon: int = 5) -> dict[str, Any]:
     """Build high-level quality metrics from evaluated candidates."""
+    horizon = max(1, min(int(horizon), 5))
     if evaluation is None or evaluation.empty:
         return {
             "sample_count": 0,
+            "selected_horizon": horizon,
+            "avg_return_selected": 0.0,
+            "win_rate_selected": 0.0,
+            "best_return_selected": 0.0,
+            "worst_return_selected": 0.0,
             "avg_return_d5": 0.0,
             "win_rate_d5": 0.0,
             "best_return_d5": 0.0,
             "worst_return_d5": 0.0,
         }
 
-    summary: dict[str, Any] = {"sample_count": len(evaluation)}
-    for day in range(1, horizon + 1):
+    summary: dict[str, Any] = {"sample_count": len(evaluation), "selected_horizon": horizon}
+    for day in range(1, 6):
         col = f"return_d{day}"
-        valid = pd.to_numeric(evaluation.get(col), errors="coerce").dropna()
+        valid = _numeric_column(evaluation, col)
         summary[f"avg_return_d{day}"] = float(valid.mean()) if not valid.empty else 0.0
         summary[f"win_rate_d{day}"] = float((valid > 0).mean() * 100) if not valid.empty else 0.0
 
-    d5 = pd.to_numeric(evaluation.get(f"return_d{horizon}"), errors="coerce").dropna()
-    summary["avg_return_d5"] = summary.get(f"avg_return_d{horizon}", 0.0)
-    summary["win_rate_d5"] = summary.get(f"win_rate_d{horizon}", 0.0)
+    selected = _numeric_column(evaluation, f"return_d{horizon}")
+    summary["avg_return_selected"] = summary.get(f"avg_return_d{horizon}", 0.0)
+    summary["win_rate_selected"] = summary.get(f"win_rate_d{horizon}", 0.0)
+    summary["best_return_selected"] = float(selected.max()) if not selected.empty else 0.0
+    summary["worst_return_selected"] = float(selected.min()) if not selected.empty else 0.0
+
+    d5 = _numeric_column(evaluation, "return_d5")
     summary["best_return_d5"] = float(d5.max()) if not d5.empty else 0.0
     summary["worst_return_d5"] = float(d5.min()) if not d5.empty else 0.0
     return summary
+
+
+def _numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
+    """Return a numeric Series for an optional evaluation column."""
+    if column not in df.columns:
+        return pd.Series(dtype="float64")
+    return pd.to_numeric(df[column], errors="coerce").dropna()
 
 
 def _evaluate_one(item: pd.Series, history: pd.DataFrame, signal_date: date, horizon: int) -> dict[str, Any]:
