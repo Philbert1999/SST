@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import os
+import tempfile
+from uuid import uuid4
 from pathlib import Path
 from typing import Any, Callable
 
@@ -38,7 +41,7 @@ def save_screening_snapshot(results: pd.DataFrame, signal_date, options: dict[st
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     signal_date_text = _date_text(signal_date)
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    filename = f"screening_{signal_date_text}_{datetime.now():%H%M%S}.csv"
+    filename = f"screening_{signal_date_text}_{datetime.now():%H%M%S%f}_{uuid4().hex[:8]}.csv"
     path = SNAPSHOT_DIR / filename
 
     df = results.copy()
@@ -50,7 +53,15 @@ def save_screening_snapshot(results: pd.DataFrame, signal_date, options: dict[st
         df["max_price_filter"] = options.get("max_price")
         df["min_amount_filter"] = options.get("min_amount")
 
-    df.to_csv(path, index=False, encoding="utf-8-sig")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=SNAPSHOT_DIR, suffix=".tmp", delete=False) as file:
+            temporary = Path(file.name)
+        df.to_csv(temporary, index=False, encoding="utf-8-sig")
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path
 
 
@@ -97,11 +108,11 @@ def evaluate_snapshot(
     total = len(snapshot)
     for index, (_, item) in enumerate(snapshot.iterrows(), start=1):
         code = str(item.get("code", "")).zfill(6)
-        signal_date = _parse_signal_date(item)
         if progress_callback:
             progress_callback(index, total, code)
 
         try:
+            signal_date = _parse_signal_date(item)
             history_start = signal_date - timedelta(days=10)
             history_end = signal_date + timedelta(days=max(20, horizon * 4))
             history = _get_daily_data(data_provider, code, history_start, history_end, force_refresh=True)

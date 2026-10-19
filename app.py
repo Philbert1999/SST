@@ -31,7 +31,7 @@ STRATEGY_FACTORIES = {
     "\u5f3a\u52bf\u56de\u8e29": StrongPullbackStrategy,
     "\u5f3a\u5ea6\u6253\u5206": StrengthScoreStrategy,
 }
-DATA_CACHE_VERSION = "akshare_fallback_v2"
+DATA_CACHE_VERSION = "akshare_fallback_v3"
 
 
 @st.cache_resource(show_spinner=False)
@@ -41,67 +41,75 @@ def get_data_provider() -> AkshareProvider:
 
 @st.cache_data(show_spinner=False, ttl=60 * 10)
 def load_stock_list(_provider: AkshareProvider, cache_version: str) -> pd.DataFrame:
-    return _provider.get_stock_list()
+    data = _provider.get_stock_list()
+    if data.empty:
+        raise RuntimeError("股票列表暂时无法获取，请刷新连接后重试。")
+    return data
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 10)
 def load_daily_data(_provider: AkshareProvider, code: str, start_date: date, end_date: date, cache_version: str) -> pd.DataFrame:
-    return _provider.get_daily_data(code, start_date, end_date)
+    data = _provider.get_daily_data(code, start_date, end_date)
+    if data.empty:
+        raise RuntimeError("日线数据暂时不可用，请稍后重试。")
+    return data
 
 
 def build_sidebar() -> dict:
-    st.sidebar.header("\u7b5b\u9009\u6761\u4ef6")
+    with st.sidebar.form("scan_filters"):
+        st.header("\u7b5b\u9009\u6761\u4ef6")
+        st.caption("修改条件后点击运行筛选，统一提交；旧结果会保留到新一轮成功完成。")
 
-    today = date.today()
-    default_start = today - timedelta(days=APP_CONFIG.ui.default_history_days)
-    default_end = today
-    start_date = st.sidebar.date_input(
-        "\u5f00\u59cb\u65e5\u671f",
-        value=default_start,
-        max_value=today,
-        key="scan_start_date",
-    )
-    end_date = st.sidebar.date_input(
-        "\u7ed3\u675f\u65e5\u671f",
-        value=default_end,
-        max_value=today,
-        key="scan_end_date",
-    )
-    start_date, end_date, date_valid, date_message = normalize_scan_dates(start_date, end_date, today)
-    if not date_valid:
-        st.sidebar.error(date_message)
-    elif (end_date - start_date).days < 45:
-        st.sidebar.warning("\u65e5\u671f\u8de8\u5ea6\u8f83\u77ed\uff0c\u90e8\u5206\u7b56\u7565\u53ef\u80fd\u56e0\u6837\u672c\u4e0d\u8db3\u800c\u65e0\u6cd5\u89e6\u53d1\u3002")
+        today = date.today()
+        default_start = today - timedelta(days=APP_CONFIG.ui.default_history_days)
+        default_end = today
+        start_date = st.date_input(
+            "\u5f00\u59cb\u65e5\u671f",
+            value=default_start,
+            max_value=today,
+            key="scan_start_date",
+        )
+        end_date = st.date_input(
+            "\u7ed3\u675f\u65e5\u671f",
+            value=default_end,
+            max_value=today,
+            key="scan_end_date",
+        )
+        start_date, end_date, date_valid, date_message = normalize_scan_dates(start_date, end_date, today)
+        if not date_valid:
+            st.error(date_message)
+        elif (end_date - start_date).days < 45:
+            st.warning("\u65e5\u671f\u8de8\u5ea6\u8f83\u77ed\uff0c\u90e8\u5206\u7b56\u7565\u53ef\u80fd\u56e0\u6837\u672c\u4e0d\u8db3\u800c\u65e0\u6cd5\u89e6\u53d1\u3002")
 
-    selected_strategy_names = st.sidebar.multiselect(
-        "\u7b56\u7565\u9009\u62e9",
-        options=list(STRATEGY_FACTORIES),
-        default=list(STRATEGY_FACTORIES),
-    )
+        selected_strategy_names = st.multiselect(
+            "\u7b56\u7565\u9009\u62e9",
+            options=list(STRATEGY_FACTORIES),
+            default=list(STRATEGY_FACTORIES),
+        )
 
-    min_amount_yi = st.sidebar.number_input(
-        "\u6700\u4f4e\u6210\u4ea4\u989d\uff08\u4ebf\u5143\uff09",
-        min_value=0.0,
-        value=APP_CONFIG.ui.default_min_amount_yi,
-        step=0.5,
-    )
-    min_price = st.sidebar.number_input(
-        "\u6700\u4f4e\u80a1\u4ef7\uff08\u5143\uff09",
-        min_value=0.0,
-        value=APP_CONFIG.ui.default_min_price,
-        step=0.5,
-    )
-    max_price = st.sidebar.number_input(
-        "\u6700\u9ad8\u80a1\u4ef7\uff08\u5143\uff09",
-        min_value=1.0,
-        value=APP_CONFIG.ui.default_max_price,
-        step=5.0,
-    )
-    exclude_st = st.sidebar.checkbox("\u6392\u9664 ST", value=APP_CONFIG.ui.default_exclude_st)
-    exclude_new = st.sidebar.checkbox("\u6392\u9664\u65b0\u80a1\uff08\u4e0a\u5e02\u4e0d\u8db3 60 \u5929\uff09", value=APP_CONFIG.ui.default_exclude_new_stock)
-    exclude_star_market = st.sidebar.checkbox("\u6392\u9664\u79d1\u521b\u677f", value=APP_CONFIG.ui.default_exclude_star_market)
+        min_amount_yi = st.number_input(
+            "\u6700\u4f4e\u6210\u4ea4\u989d\uff08\u4ebf\u5143\uff09",
+            min_value=0.0,
+            value=APP_CONFIG.ui.default_min_amount_yi,
+            step=0.5,
+        )
+        min_price = st.number_input(
+            "\u6700\u4f4e\u80a1\u4ef7\uff08\u5143\uff09",
+            min_value=0.0,
+            value=APP_CONFIG.ui.default_min_price,
+            step=0.5,
+        )
+        max_price = st.number_input(
+            "\u6700\u9ad8\u80a1\u4ef7\uff08\u5143\uff09",
+            min_value=1.0,
+            value=APP_CONFIG.ui.default_max_price,
+            step=5.0,
+        )
+        exclude_st = st.checkbox("\u6392\u9664 ST", value=APP_CONFIG.ui.default_exclude_st)
+        exclude_new = st.checkbox("\u6392\u9664\u65b0\u80a1\uff08\u4e0a\u5e02\u4e0d\u8db3 60 \u5929\uff09", value=APP_CONFIG.ui.default_exclude_new_stock)
+        exclude_star_market = st.checkbox("\u6392\u9664\u79d1\u521b\u677f", value=APP_CONFIG.ui.default_exclude_star_market)
 
-    run_scan = st.sidebar.button("\u8fd0\u884c\u7b5b\u9009", type="primary", use_container_width=True)
+        run_scan = st.form_submit_button("\u8fd0\u884c\u7b5b\u9009", type="primary", use_container_width=True)
 
     return {
         "start_date": start_date,
@@ -143,6 +151,7 @@ def init_state() -> None:
         "last_scan_count": 0,
         "last_snapshot_path": "",
         "last_evaluation": pd.DataFrame(),
+        "last_scan_options": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -157,11 +166,14 @@ def run_scan(provider: AkshareProvider, options: dict) -> None:
         st.warning("\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u4e2a\u7b56\u7565\u3002")
         return
 
-    stock_list = load_stock_list(provider, DATA_CACHE_VERSION)
-    if stock_list.empty:
-        st.session_state.stock_list = stock_list
-        st.session_state.scan_results = pd.DataFrame()
-        st.warning("\u80a1\u7968\u5217\u8868\u4e3a\u7a7a\u3002\u5f53\u524d\u7f51\u7edc\u73af\u5883\u53ef\u80fd\u65e0\u6cd5\u8bbf\u95ee AKShare \u6570\u636e\u6e90\u3002")
+    if options["min_price"] > options["max_price"]:
+        st.error("最低股价不能高于最高股价；上次筛选结果已保留。")
+        return
+    try:
+        with st.spinner("正在获取股票列表…"):
+            stock_list = load_stock_list(provider, DATA_CACHE_VERSION)
+    except Exception as exc:
+        st.error(f"股票列表获取失败：{exc}。上次筛选结果已保留，可用侧栏刷新按钮重试。")
         return
 
     strategies = [STRATEGY_FACTORIES[name]() for name in options["selected_strategy_names"]]
@@ -195,15 +207,25 @@ def run_scan(provider: AkshareProvider, options: dict) -> None:
         results = scanner.scan()
 
     progress.empty()
-    st.session_state.stock_list = stock_list
-    st.session_state.scan_results = results
     st.session_state.scanner_errors = scanner.errors
     st.session_state.scanner_skipped = scanner.skipped
+    if results.empty and scanner.errors:
+        st.error(f"本轮有 {len(scanner.errors)} 只股票读取失败，且未得到候选。上次结果已保留；详见扫描日志。")
+        return
+    st.session_state.last_scan_options = dict(options)
+    st.session_state.stock_list = stock_list
+    st.session_state.scan_results = results
     st.session_state.last_scan_count = len(stock_list)
-    snapshot_path = save_screening_snapshot(results, options["end_date"], options)
+    try:
+        snapshot_path = save_screening_snapshot(results, options["end_date"], options)
+    except OSError as exc:
+        snapshot_path = None
+        st.warning(f"筛选结果可继续查看与导出，但快照保存失败：{exc}")
     st.session_state.last_snapshot_path = str(snapshot_path or "")
 
     st.success(f"\u7b5b\u9009\u5b8c\u6210\uff0c\u5165\u9009 {len(results)} \u53ea\u80a1\u7968\u3002")
+    if scanner.errors:
+        st.warning(f"本轮有 {len(scanner.errors)} 只股票读取失败，结果仅涵盖读取成功的股票，详见扫描日志。")
     if snapshot_path:
         st.info(f"\u5df2\u4fdd\u5b58\u590d\u76d8\u5feb\u7167\uff1a{snapshot_path.name}")
 
@@ -216,32 +238,6 @@ def render_main(provider: AkshareProvider, options: dict) -> None:
     max_score = float(results["total_score"].max()) if selected_count else 0.0
 
     render_metric_cards(scan_count, selected_count, avg_score, max_score)
-
-    st.subheader("\u5019\u9009\u6c60\u7ed3\u679c")
-    st.markdown(
-        '<div class="subtle-note">\u70b9\u51fb\u8868\u683c\u4e2d\u7684\u80a1\u7968\u884c\uff0c\u53ef\u67e5\u770b\u89e6\u53d1\u539f\u56e0\u3001\u98ce\u9669\u63d0\u793a\u548c K \u7ebf\u8d70\u52bf\u3002</div>',
-        unsafe_allow_html=True,
-    )
-    selected_index = render_results_table(results)
-    csv_download_button(results, f"stock_candidates_{pd.Timestamp.now():%Y%m%d_%H%M%S}.csv")
-
-    if results.empty:
-        return
-
-    sorted_results = results.sort_values("total_score", ascending=False).reset_index(drop=True)
-    if selected_index is None:
-        selected_index = 0
-    selected_row = sorted_results.iloc[selected_index]
-
-    st.divider()
-    left, right = st.columns([0.92, 1.28], gap="large")
-    with left:
-        render_stock_detail(selected_row)
-
-    with right:
-        code = str(selected_row["code"]).zfill(6)
-        chart_data = load_daily_data(provider, code, options["start_date"], options["end_date"], DATA_CACHE_VERSION)
-        st.plotly_chart(kline_chart(chart_data, f"{code} {selected_row['name']} K\u7ebf"), use_container_width=True)
 
     with st.expander("\u626b\u63cf\u65e5\u5fd7", expanded=False):
         col1, col2 = st.columns(2)
@@ -258,6 +254,43 @@ def render_main(provider: AkshareProvider, options: dict) -> None:
                 st.dataframe(skipped.head(200), use_container_width=True, hide_index=True)
             else:
                 st.write("\u6682\u65e0\u8fc7\u6ee4\u8bb0\u5f55\u3002")
+
+    st.subheader("\u5019\u9009\u6c60\u7ed3\u679c")
+    st.markdown(
+        '<div class="subtle-note">\u70b9\u51fb\u8868\u683c\u4e2d\u7684\u80a1\u7968\u884c\uff0c\u53ef\u67e5\u770b\u89e6\u53d1\u539f\u56e0\u3001\u98ce\u9669\u63d0\u793a\u548c K \u7ebf\u8d70\u52bf\u3002</div>',
+        unsafe_allow_html=True,
+    )
+    if results.empty and st.session_state.last_scan_count == 0:
+        st.info("尚未运行筛选。先在左侧设置日期与条件，再点击运行筛选；连接失败可点击刷新股票列表重试。")
+        return
+    selected_index = render_results_table(results)
+    csv_download_button(results, f"stock_candidates_{pd.Timestamp.now():%Y%m%d_%H%M%S}.csv")
+
+    if results.empty:
+        return
+
+    scan_options = st.session_state.last_scan_options or options
+    st.caption(f"显示已完成筛选：{scan_options['start_date']} 至 {scan_options['end_date']}。修改条件后需点击运行筛选。")
+    sorted_results = results.sort_values("total_score", ascending=False).reset_index(drop=True)
+    if selected_index is None:
+        selected_index = 0
+    selected_row = sorted_results.iloc[selected_index]
+
+    st.divider()
+    left, right = st.columns([0.92, 1.28], gap="large")
+    with left:
+        render_stock_detail(selected_row)
+
+    with right:
+        code = str(selected_row["code"]).zfill(6)
+        try:
+            chart_data = load_daily_data(provider, code, scan_options["start_date"], scan_options["end_date"], DATA_CACHE_VERSION)
+        except Exception as exc:
+            st.warning(f"K 线暂时无法加载：{exc}。筛选结果仍可查看与导出。")
+            chart_data = pd.DataFrame()
+        st.plotly_chart(kline_chart(chart_data, f"{code} {selected_row['name']} K\u7ebf"), use_container_width=True)
+
+
 
 
 def render_performance_review(provider: AkshareProvider) -> None:
@@ -367,6 +400,17 @@ def main() -> None:
 
     provider = get_data_provider()
     options = build_sidebar()
+    if st.sidebar.button("刷新股票列表 / 重试连接", use_container_width=True):
+        load_stock_list.clear()
+        try:
+            with st.spinner("正在重新连接数据源…"):
+                refreshed = provider.get_stock_list(force_refresh=True)
+            if refreshed.empty:
+                st.sidebar.error("数据源仍不可用，请稍后重试。已有结果未清除。")
+            else:
+                st.sidebar.success(f"股票列表已更新：{len(refreshed):,} 只。")
+        except Exception as exc:
+            st.sidebar.error(f"连接失败：{exc}。已有结果未清除。")
 
     tab_scan, tab_review = st.tabs(["\u5019\u9009\u7b5b\u9009", "\u6548\u679c\u590d\u76d8"])
     with tab_scan:

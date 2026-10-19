@@ -44,38 +44,43 @@ class AkshareProvider(DataProvider):
         self.errors: list[dict[str, Any]] = []
         self._prefer_sina_daily = False
 
-    def get_stock_list(self) -> pd.DataFrame:
+    def get_stock_list(self, force_refresh: bool = False) -> pd.DataFrame:
         cache_key = "akshare_stock_list"
-        cached = self.cache.get(cache_key, self.cache_ttl_seconds)
-        if cached is not None:
+        cached = None if force_refresh else self.cache.get(cache_key, self.cache_ttl_seconds)
+        if cached is not None and not cached.empty:
             logger.info("Loaded stock list from cache: %s rows", len(cached))
             return cached.copy()
 
-        quotes = self.get_realtime_quotes()
+        if force_refresh:
+            self._prefer_sina_daily = False
+        quotes = self.get_realtime_quotes(force_refresh=force_refresh)
         if not quotes.empty:
             stock_list = quotes[["code", "name", "market", "is_st", "listing_date"]].copy()
             stock_list = stock_list.drop_duplicates(subset=["code"]).sort_values("code").reset_index(drop=True)
-            self.cache.set(cache_key, stock_list)
+            if not stock_list.empty:
+                self.cache.set(cache_key, stock_list)
             logger.info("Built stock list from realtime quotes: %s rows", len(stock_list))
             return stock_list
 
         stock_list = self._get_stock_list_fallback()
-        self.cache.set(cache_key, stock_list)
+        if not stock_list.empty:
+            self.cache.set(cache_key, stock_list)
         return stock_list
 
     def get_daily_data(self, code: str, start_date, end_date, force_refresh: bool = False) -> pd.DataFrame:
         code = self._normalize_code(code)
         start = self._normalize_date(start_date)
         end = self._normalize_date(end_date)
-        cache_key = f"akshare_daily_{code}_{start}_{end}_{self.adjust}"
+        cache_key = f"akshare_daily_v3_{code}_{start}_{end}_{self.adjust}"
         cached = None if force_refresh else self.cache.get(cache_key, self.daily_cache_ttl_seconds)
-        if cached is not None:
+        if cached is not None and not cached.empty:
             logger.info("Loaded daily data from cache: %s %s rows", code, len(cached))
             return cached.copy()
 
         try:
             import akshare as ak
 
+            source = "sina" if self._prefer_sina_daily else "eastmoney"
             if self._prefer_sina_daily:
                 raw = self._fetch_sina_daily(ak, code, start, end)
             else:
@@ -86,13 +91,19 @@ class AkshareProvider(DataProvider):
                         start_date=start,
                         end_date=end,
                         adjust=self.adjust,
+                        timeout=15,
                     )
+                    if raw is None or raw.empty:
+                        raise ValueError("Eastmoney returned no daily bars")
                 except Exception as primary_exc:
                     logger.warning("Eastmoney daily endpoint failed for %s, switching to Sina fallback: %s", code, primary_exc)
                     self._prefer_sina_daily = True
+                    source = "sina"
                     raw = self._fetch_sina_daily(ak, code, start, end)
 
-            df = self._standardize_daily_data(raw)
+            df = self._standardize_daily_data(raw, source=source)
+            if df.empty:
+                raise ValueError("日线源未返回可用数据，可能无交易记录或数据源暂不可用")
             self.cache.set(cache_key, df)
             logger.info("Fetched daily data: %s %s rows", code, len(df))
             return df
@@ -101,10 +112,10 @@ class AkshareProvider(DataProvider):
             self.errors.append({"scope": "daily", "code": code, "error": str(exc)})
             return pd.DataFrame(columns=DAILY_COLUMNS)
 
-    def get_realtime_quotes(self) -> pd.DataFrame:
+    def get_realtime_quotes(self, force_refresh: bool = False) -> pd.DataFrame:
         cache_key = "akshare_realtime_quotes"
-        cached = self.cache.get(cache_key, self.cache_ttl_seconds)
-        if cached is not None:
+        cached = None if force_refresh else self.cache.get(cache_key, self.cache_ttl_seconds)
+        if cached is not None and not cached.empty:
             logger.info("Loaded realtime quotes from cache: %s rows", len(cached))
             return cached.copy()
 
@@ -113,7 +124,8 @@ class AkshareProvider(DataProvider):
 
             raw = ak.stock_zh_a_spot_em()
             df = self._standardize_realtime_quotes(raw)
-            self.cache.set(cache_key, df)
+            if not df.empty:
+                self.cache.set(cache_key, df)
             logger.info("Fetched realtime quotes: %s rows", len(df))
             return df
         except Exception as exc:
@@ -124,7 +136,7 @@ class AkshareProvider(DataProvider):
     def get_sector_data(self) -> pd.DataFrame:
         cache_key = "akshare_sector_data"
         cached = self.cache.get(cache_key, self.cache_ttl_seconds)
-        if cached is not None:
+        if cached is not None and not cached.empty:
             logger.info("Loaded sector data from cache: %s rows", len(cached))
             return cached.copy()
 
@@ -133,7 +145,8 @@ class AkshareProvider(DataProvider):
 
             raw = ak.stock_board_industry_name_em()
             df = self._standardize_sector_data(raw)
-            self.cache.set(cache_key, df)
+            if not df.empty:
+                self.cache.set(cache_key, df)
             logger.info("Fetched sector data: %s rows", len(df))
             return df
         except Exception as exc:
@@ -209,7 +222,7 @@ class AkshareProvider(DataProvider):
             adjust=self.adjust,
         )
 
-    def _standardize_daily_data(self, raw: pd.DataFrame) -> pd.DataFrame:
+    def _standardize_daily_data(self, raw: pd.DataFrame, source: str = "eastmoney") -> pd.DataFrame:
         if raw is None or raw.empty:
             return pd.DataFrame(columns=DAILY_COLUMNS)
 
@@ -237,8 +250,10 @@ class AkshareProvider(DataProvider):
                 df[column] = pd.to_numeric(df[column], errors="coerce")
         if df["pct_chg"].isna().all() and len(df) > 1:
             df["pct_chg"] = df["close"].pct_change() * 100
-        if df["turnover"].notna().any() and df["turnover"].max(skipna=True) <= 1:
+        # Vendor units differ: Eastmoney uses lots/percent; Sina uses shares/fraction.
+        if source == "sina":
             df["turnover"] = df["turnover"] * 100
+            df["volume"] = df["volume"] / 100
         return df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
 
     def _standardize_realtime_quotes(self, raw: pd.DataFrame) -> pd.DataFrame:
