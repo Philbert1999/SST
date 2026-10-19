@@ -85,7 +85,11 @@ class StockScanner:
                     self._report_progress(index, total, code, meta_skip_reason)
                     continue
 
+                error_count = len(getattr(self.data_provider, "errors", []))
                 df = self.data_provider.get_daily_data(code, self.start_date, self.end_date)
+                provider_errors = getattr(self.data_provider, "errors", [])
+                if (df is None or df.empty) and len(provider_errors) > error_count:
+                    raise RuntimeError(provider_errors[-1].get("error", "行情读取失败"))
                 df = self._normalize_daily_data(df)
                 daily_skip_reason = self._daily_filter_reason(df)
                 if daily_skip_reason:

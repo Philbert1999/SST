@@ -6,3 +6,5 @@ snapshots/
 streamlit*.log
 .streamlit/secrets.toml
 .env
+
+.venv/

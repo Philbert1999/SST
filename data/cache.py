@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import pickle
+import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -24,11 +27,9 @@ class FileCache:
 
     def get(self, key: str, ttl_seconds: int) -> Any | None:
         path = self._path(key)
-        if not path.exists():
-            return None
-        if time.time() - path.stat().st_mtime > ttl_seconds:
-            return None
         try:
+            if time.time() - path.stat().st_mtime > ttl_seconds:
+                return None
             with path.open("rb") as file:
                 return pickle.load(file)
         except Exception:
@@ -36,8 +37,14 @@ class FileCache:
 
     def set(self, key: str, value: Any) -> None:
         path = self._path(key)
+        temporary = None
         try:
-            with path.open("wb") as file:
+            with tempfile.NamedTemporaryFile(dir=self.cache_dir, delete=False) as file:
+                temporary = Path(file.name)
                 pickle.dump(value, file)
+            os.replace(temporary, path)
         except Exception:
-            path.unlink(missing_ok=True)
+            logging.getLogger(__name__).warning("Unable to save cache %s", key, exc_info=True)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
